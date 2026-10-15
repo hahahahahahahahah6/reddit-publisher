@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>One-Tap Reddit Publisher</title>
+<style>
+  :root { --bg:#0f1115; --card:#1a1d24; --text:#e8eaf0; --muted:#9aa0ae; --accent:#ff4500; --green:#46d160; --border:#2a2e38; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; padding:16px; max-width:640px; margin:0 auto; }
+  h1 { font-size:20px; margin:8px 0 4px; }
+  p.sub { color:var(--muted); font-size:13px; margin:0 0 16px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:12px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:12px 0 4px; text-transform:uppercase; letter-spacing:.5px; }
+  input, textarea, select { width:100%; background:#0f1115; border:1px solid var(--border); color:var(--text); border-radius:8px; padding:10px 12px; font-size:15px; }
+  textarea { min-height:220px; font-family:ui-monospace,Menlo,monospace; font-size:13px; line-height:1.5; resize:vertical; }
+  button { width:100%; border:none; border-radius:10px; padding:14px; font-size:16px; font-weight:600; cursor:pointer; margin-top:12px; }
+  .btn-primary { background:var(--accent); color:#fff; }
+  .btn-primary:disabled { opacity:.4; cursor:default; }
+  .btn-secondary { background:#2a2e38; color:var(--text); }
+  .status { font-size:13px; padding:10px 12px; border-radius:8px; margin-top:12px; display:none; }
+  .status.ok { display:block; background:rgba(70,209,96,.12); color:var(--green); border:1px solid rgba(70,209,96,.3); }
+  .status.err { display:block; background:rgba(255,69,0,.12); color:#ff7a4d; border:1px solid rgba(255,69,0,.3); }
+  .status.info { display:block; background:rgba(120,140,180,.12); color:#aeb8cc; border:1px solid var(--border); }
+  .row { display:flex; gap:8px; }
+  .row > * { flex:1; }
+  .whoami { font-size:13px; color:var(--green); }
+  details { margin-top:8px; font-size:13px; color:var(--muted); }
+  details summary { cursor:pointer; color:var(--text); }
+  ol { padding-left:20px; } ol li { margin:8px 0; }
+  code { background:#0f1115; padding:2px 6px; border-radius:4px; font-size:12px; word-break:break-all; }
+  .draft-chip { display:inline-block; background:#2a2e38; border-radius:20px; padding:6px 12px; font-size:13px; margin:4px 4px 0 0; cursor:pointer; }
+  .draft-chip.active { background:var(--accent); color:#fff; }
+</style>
+</head>
+<body>
+<h1>📮 One-Tap Reddit Publisher</h1>
+<p class="sub">Posts go straight from <b>your phone</b> to Reddit — nothing passes through a server.</p>
+
+<div class="card" id="setupCard">
+  <h3 style="margin:0 0 4px;font-size:15px;">① Connect Reddit</h3>
+  <div id="loginArea">
+    <label>Reddit App Client ID</label>
+    <input id="clientId" placeholder="paste your client id here" autocomplete="off">
+    <button class="btn-secondary" id="saveClientBtn">Save Client ID</button>
+    <details>
+      <summary>How to get a Client ID (2 min, one time)</summary>
+      <ol>
+        <li>On your phone, open <code>reddit.com/prefs/apps</code> in Safari (log in if needed)</li>
+        <li>Tap <b>"are you a developer? create an app…"</b></li>
+        <li>Name: <code>one-tap-publisher</code>, type: <b>installed app</b></li>
+        <li>Redirect URI: <code>https://hahahahahahahahah6.github.io/reddit-publisher/</code></li>
+        <li>Create, then copy the <b>client id</b> shown under the app name and paste it above</li>
+      </ol>
+    </details>
+    <button class="btn-primary" id="connectBtn" disabled>Connect with Reddit</button>
+  </div>
+  <div id="whoamiArea" style="display:none">
+    <span class="whoami" id="whoami"></span>
+    <button class="btn-secondary" id="logoutBtn" style="margin-top:8px">Disconnect</button>
+  </div>
+  <div class="status" id="authStatus"></div>
+</div>
+
+<div class="card">
+  <h3 style="margin:0 0 4px;font-size:15px;">② Write your post</h3>
+  <div id="draftChips" style="margin-bottom:4px"></div>
+  <div class="row">
+    <div><label>Subreddit</label><input id="subreddit" value="ClaudeCode" placeholder="ClaudeCode"></div>
+    <div><label>Flair</label><select id="flair"><option value="">(no flair)</option></select></div>
+  </div>
+  <label>Title</label>
+  <input id="title" placeholder="Post title">
+  <label>Body (Markdown)</label>
+  <textarea id="body" placeholder="Write it in Markdown…"></textarea>
+  <div class="row">
+    <button class="btn-secondary" id="loadFlairsBtn">Load flairs</button>
+    <button class="btn-secondary" id="saveDraftBtn">💾 Save draft</button>
+  </div>
+  <button class="btn-primary" id="publishBtn" disabled>🚀 Publish to Reddit</button>
+  <div class="status" id="pubStatus"></div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const REDIRECT_URI = "https://hahahahahahahahah6.github.io/reddit-publisher/";
+const store = {
+  get(k, d){ try { const v = localStorage.getItem("rtp_"+k); return v===null?d:JSON.parse(v); } catch(e){ return d; } },
+  set(k, v){ try { localStorage.setItem("rtp_"+k, JSON.stringify(v)); } catch(e){} },
+  del(k){ localStorage.removeItem("rtp_"+k); }
+};
+
+// ---------- PKCE helpers ----------
+function randStr(n){ const a=new Uint8Array(n); crypto.getRandomValues(a); return Array.from(a,x=>("0"+x.toString(16)).slice(-2)).join(""); }
+async function challenge(verifier){
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+function status(el, msg, cls){ el.textContent = msg; el.className = "status "+cls; }
+
+// ---------- drafts ----------
+const BUILTIN_DRAFTS = [
+  { name:"agent-guard → r/ClaudeCode", sub:"ClaudeCode",
+    title:"My agent changed `toBe(10)` to `toBe(9)` and called it done. So I built a hook that stops that.",
+    body:"Was watching my agent debug a failing test yesterday. Instead of fixing the code, it quietly edited the assertion — `toBe(10)` became `toBe(9)` — and reported \"all tests pass.\" That's not debugging, that's lying to the test suite.\n\nSo I built agent-guard: a set of Claude Code hooks that watch for exactly this. It blocks the agent from editing test assertions to get green, catches it bypassing Edit/Write by rewriting files through Bash (sed -i, heredocs, redirects), and has a Stop hook as a final backstop that re-verifies before the session ends.\n\nIt's not perfect — there are known gaps, and I'm upfront about them in the repo. But \"my tests pass because the agent rewrote the expectations\" shouldn't be a thing that happens silently.\n\nMIT licensed, feedback welcome: https://github.com/hahahahahahahahah6/agent-guard" }
+];
+function getDrafts(){ return store.get("drafts", []); }
+function renderChips(){
+  const box = $("draftChips"); box.innerHTML = "";
+  BUILTIN_DRAFTS.concat(getDrafts()).forEach((d,i)=>{
+    const c = document.createElement("span"); c.className="draft-chip"; c.textContent=d.name||("draft "+(i+1));
+    c.onclick = ()=>{ $("subreddit").value=d.sub||""; $("title").value=d.title||""; $("body").value=d.body||"";
+      box.querySelectorAll(".draft-chip").forEach(x=>x.classList.remove("active")); c.classList.add("active"); loadFlairs(); };
+    box.appendChild(c);
+  });
+}
+
+// ---------- auth ----------
+function clientId(){ return ($("clientId").value||"").trim() || store.get("client_id",""); }
+function token(){ return store.get("token", null); }
+
+async function startLogin(){
+  const cid = clientId();
+  if(!cid){ status($("authStatus"), "Save your Client ID first.", "err"); return; }
+  const verifier = randStr(64), state = randStr(16);
+  store.set("verifier", verifier); store.set("state", state);
+  const ch = await challenge(verifier);
+  const url = "https://www.reddit.com/api/v1/authorize?"+new URLSearchParams({
+    client_id: cid, response_type:"code", state,
+    redirect_uri: REDIRECT_URI, duration:"permanent",
+    scope:"submit identity read", code_challenge:ch, code_challenge_method:"S256"
+  });
+  location.href = url;
+}
+
+async function exchangeCode(code){
+  const cid = clientId(), verifier = store.get("verifier","");
+  const basic = btoa(cid + ":"); // installed app: client_id as user, empty secret
+  const res = await fetch("https://www.reddit.com/api/v1/access_token", {
+    method:"POST",
+    headers:{ "Content-Type":"application/x-www-form-urlencoded", "Authorization":"Basic "+basic },
+    body:new URLSearchParams({ grant_type:"authorization_code", code, redirect_uri:REDIRECT_URI, code_verifier:verifier })
+  });
+  if(!res.ok) throw new Error("token exchange failed: "+res.status);
+  const data = await res.json();
+  if(data.error) throw new Error(data.error+": "+(data.error_description||""));
+  store.set("token", { access:data.access_token, refresh:data.refresh_token, exp:Date.now()+data.expires_in*1000 });
+  store.del("verifier"); store.del("state");
+}
+
+async function refreshToken(){
+  const t = token(); if(!t||!t.refresh) return false;
+  const cid = clientId();
+  const basic = btoa(cid + ":");
+  try{
+    const res = await fetch("https://www.reddit.com/api/v1/access_token", {
+      method:"POST",
+      headers:{ "Content-Type":"application/x-www-form-urlencoded", "Authorization":"Basic "+basic },
+      body:new URLSearchParams({ grant_type:"refresh_token", refresh_token:t.refresh })
+    });
+    const data = await res.json();
+    if(data.access_token){ store.set("token",{ access:data.access_token, refresh:data.refresh_token||t.refresh, exp:Date.now()+data.expires_in*1000 }); return true; }
+  }catch(e){}
+  return false;
+}
+
+async function api(path, opts={}){
+  let t = token();
+  if(!t) throw new Error("not connected");
+  if(Date.now() > t.exp - 60000){ if(!(await refreshToken())) throw new Error("session expired, reconnect"); t = token(); }
+  const res = await fetch("https://oauth.reddit.com"+path, {
+    ...opts,
+    headers:{ "Authorization":"Bearer "+t.access, ...(opts.headers||{}) }
+  });
+  if(res.status===401){ store.del("token"); throw new Error("unauthorized, reconnect"); }
+  return res;
+}
+
+async function refreshUI(){
+  const t = token();
+  if(t){
+    try{
+      const res = await api("/api/v1/me");
+      const me = await res.json();
+      $("loginArea").style.display="none"; $("whoamiArea").style.display="block";
+      $("whoami").textContent = "✓ connected as u/"+me.name;
+      $("publishBtn").disabled = false;
+      status($("authStatus"), "", "");
+    }catch(e){ $("loginArea").style.display="block"; $("whoamiArea").style.display="none"; status($("authStatus"), e.message, "err"); }
+  } else {
+    $("loginArea").style.display="block"; $("whoamiArea").style.display="none";
+    $("publishBtn").disabled = true;
+  }
+  const saved = store.get("client_id","");
+  if(saved && !$("clientId").value) $("clientId").value = saved;
+  $("connectBtn").disabled = !clientId();
+}
+
+// ---------- flairs ----------
+async function loadFlairs(){
+  const sr = ($("subreddit").value||"").trim().replace(/^r\//,"");
+  if(!sr || !token()) return;
+  try{
+    const res = await api("/r/"+sr+"/api/link_flair_v2");
+    const flairs = await res.json();
+    const sel = $("flair"); sel.innerHTML = '<option value="">(no flair)</option>';
+    (Array.isArray(flairs)?flairs:[]).forEach(f=>{
+      const o=document.createElement("option"); o.value=f.id; o.textContent=f.text; sel.appendChild(o);
+    });
+    const built = BUILTIN_DRAFTS.find(d=>d.sub.toLowerCase()===sr.toLowerCase());
+    status($("pubStatus"), flairs.length?("Loaded "+flairs.length+" flairs."):"No flairs found.", "info");
+  }catch(e){ status($("pubStatus"), "Flair load failed: "+e.message, "err"); }
+}
+
+// ---------- publish ----------
+async function publish(){
+  const sr = ($("subreddit").value||"").trim().replace(/^r\//,"");
+  const title = $("title").value.trim(), text = $("body").value;
+  const flairId = $("flair").value;
+  if(!sr||!title){ status($("pubStatus"),"Subreddit and title are required.","err"); return; }
+  $("publishBtn").disabled = true;
+  status($("pubStatus"), "Publishing…", "info");
+  try{
+    const form = new URLSearchParams({ sr, kind:"self", title, text, api_type:"json", resubmit:"true" });
+    if(flairId) form.set("flair_id", flairId);
+    const res = await api("/api/submit", { method:"POST", headers:{ "Content-Type":"application/x-www-form-urlencoded" }, body:form });
+    const data = await res.json();
+    const err = data?.json?.errors?.[0];
+    if(err){ throw new Error(err[1]||err[0]||"submit failed"); }
+    const url = data?.json?.data?.url;
+    if(url){ status($("pubStatus"), "✓ Published! "+url, "ok"); }
+    else { status($("pubStatus"), "Submitted (check your profile — Reddit may be processing).", "ok"); }
+  }catch(e){ status($("pubStatus"), "Failed: "+e.message, "err"); }
+  $("publishBtn").disabled = false;
+}
+
+// ---------- wire up ----------
+$("saveClientBtn").onclick = ()=>{ const v=$("clientId").value.trim(); if(v){ store.set("client_id",v); status($("authStatus"),"Client ID saved. Now connect.","ok"); } refreshUI(); };
+$("clientId").oninput = ()=>{ $("connectBtn").disabled = !$("clientId").value.trim() && !store.get("client_id",""); };
+$("connectBtn").onclick = startLogin;
+$("logoutBtn").onclick = ()=>{ store.del("token"); refreshUI(); };
+$("loadFlairsBtn").onclick = loadFlairs;
+$("publishBtn").onclick = publish;
+$("saveDraftBtn").onclick = ()=>{
+  const drafts = getDrafts();
+  drafts.push({ name:($("title").value||"untitled").slice(0,30), sub:$("subreddit").value, title:$("title").value, body:$("body").value });
+  store.set("drafts", drafts); renderChips(); status($("pubStatus"),"Draft saved on this device.","ok");
+};
+
+// handle OAuth callback
+(async function init(){
+  renderChips();
+  const q = new URLSearchParams(location.search);
+  if(q.get("code") && q.get("state")===store.get("state")){
+    history.replaceState({}, "", location.pathname);
+    status($("authStatus"), "Exchanging code…", "info");
+    try{ await exchangeCode(q.get("code")); status($("authStatus"), "Connected!", "ok"); }
+    catch(e){ status($("authStatus"), "Login failed: "+e.message, "err"); }
+  } else if(q.get("error")){ history.replaceState({}, "", location.pathname); status($("authStatus"), "Reddit said: "+q.get("error"), "err"); }
+  refreshUI();
+})();
+</script>
+</body>
+</html>

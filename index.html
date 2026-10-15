@@ -49,7 +49,7 @@
         <li>On your phone, open <code>reddit.com/prefs/apps</code> in Safari (log in if needed)</li>
         <li>Tap <b>"are you a developer? create an app…"</b></li>
         <li>Name: <code>one-tap-publisher</code>, type: <b>installed app</b></li>
-        <li>Redirect URI: <code>https://hahahahahahahahah6.github.io/reddit-publisher/</code></li>
+        <li>Redirect URI: <code id="redirectUri"></code> <b>(copy exactly — must match your address bar)</b></li>
         <li>Create, then copy the <b>client id</b> shown under the app name and paste it above</li>
       </ol>
     </details>
@@ -84,7 +84,13 @@
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
-const REDIRECT_URI = "https://hahahahahahahahah6.github.io/reddit-publisher/";
+// Redirect URI is derived from wherever this page is actually served —
+// register EXACTLY this URL (copy from your address bar) in your Reddit app settings.
+const REDIRECT_URI = location.origin + location.pathname.replace(/[^/]*$/, "");
+function showRedirectUri(){
+  const el = document.getElementById("redirectUri");
+  if(el) el.textContent = REDIRECT_URI;
+}
 const store = {
   get(k, d){ try { const v = localStorage.getItem("rtp_"+k); return v===null?d:JSON.parse(v); } catch(e){ return d; } },
   set(k, v){ try { localStorage.setItem("rtp_"+k, JSON.stringify(v)); } catch(e){} },
@@ -251,6 +257,7 @@ $("saveDraftBtn").onclick = ()=>{
 // handle OAuth callback
 (async function init(){
   renderChips();
+  showRedirectUri();
   const q = new URLSearchParams(location.search);
   if(q.get("code") && q.get("state")===store.get("state")){
     history.replaceState({}, "", location.pathname);
